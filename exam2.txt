@@ -1,0 +1,127 @@
+Bài 1: Diagnostic Logger với Variadic MACRO
+Yêu cầu:
+Triển khai macro DIAG_LOG(level, fmt, ...) sử dụng:
+Variadic functions cho định dạng chuỗi
+Static inline function transmit_log() ghi log qua UART/SD Card
+#pragma pack để nén cấu trúc log
+Tích hợp assert kiểm tra buffer overflow
+// VD: DIAG_LOG(WARN, "RPM=%d, Temp=%.1f", rpm, temp);  
+// Cấu trúc log: [TIMESTAMP][LEVEL][FILE:LINE] msg  
+#pragma pack(1)  
+typedef struct {  
+    uint32_t timestamp;  
+    uint8_t level;  
+    uint16_t line;  
+    char file[12];  
+    char msg[64];  
+} LogEntry;  
+Kỹ thuật: Sử dụng __VA_ARGS__, ##__VA_ARGS__, _Static_assert
+ 
+Bài 2: Sensor Data Validator với Assert Chain
+Yêu cầu:
+Viết hàm validate_sensors(int num, ...) kiểm tra:
+Giới hạn vật lý (nhiệt độ: -40~150°C, RPM: 0~8000)
+Độ chênh lệch giữa các cảm biến (assert difference < threshold)
+Triển khai callback hàm sensor_failure_handler() khi assert failed
+
+#define ASSERT_SENSOR(cond, msg) \  
+    do { \  
+        if (!(cond)) { \  
+            log_failure(__FILE__, __LINE__, msg); \  
+            assert(cond); \  
+        } \  
+    } while(0)  
+void validate_sensors(int num, ...) {  
+    va_list args;  
+    va_start(args, num);  
+    for (int i=0; i<num; i++) {  
+        SensorData s = va_arg(args, SensorData);  
+        ASSERT_SENSOR(s.temp > -40 && s.temp < 150, "Temp out of range");  
+    }  
+    va_end(args);  
+}  
+
+Bài 3: CAN Bus Dynamic Parser
+Yêu cầu :
+Đọc message CAN động với variadic functions:
+void can_parse(uint32_t id, uint8_t dlc, ...) {  
+    va_list args;  
+    va_start(args, dlc);  
+    for (int i=0; i<dlc; i++) {  
+        uint8_t *byte = va_arg(args, uint8_t*);  
+        *byte = can_rx_buffer[i];  
+    }  
+    va_end(args);  
+}  
+// Sử dụng: uint8_t d1, d2; can_parse(0x7DF, 2, &d1, &d2);  
+Tích hợp macro CAN_SAFE() kiểm tra ID/DLC hợp lệ
+Sử dụng __attribute__((section(".can_rx"))) để map bộ đệm
+
+Bài 4: Error Code Generator với X-Macro
+Yêu cầu:
+Triển khai hệ thống mã lỗi động dùng X-Macro:
+c
+// error_codes.def  
+X(ERR_ENGINE_TEMP_HIGH, 0x01, "Engine overheat")  
+X(ERR_BATTERY_LOW, 0x02, "Voltage below threshold")  
+// main.c  
+#define X(code, id, msg) code,  
+enum ErrorCode {  
+    #include "error_codes.def"  
+};  
+#undef X  
+Tạo hàm throw_error() dùng variadic arguments để thêm context
+
+Bài 5: Real-Time Task Monitor
+Yêu cầu:
+Giám sát thời gian thực thi task RTOS:
+c
+#define TASK_ENTER() \  
+    uint32_t _start = DWT->CYCCNT; \  
+    static const char *_task_name __attribute__((used)) = __func__  
+#define TASK_EXIT() \  
+    do { \  
+        uint32_t _cycles = DWT->CYCCNT - _start; \  
+        ASSERT_RT(_cycles < MAX_CYCLES, "Task %s overload", _task_name); \  
+    } while(0)  
+Tích hợp assert kiểm tra deadline violation
+
+Bài 6: Secure Firmware Update
+Yêu cầu:
+Triển khai hàm flash_write(...) dùng variadic arguments cho các khối dữ liệu
+Sử dụng macro kiểm tra CRC32:
+c
+#define VERIFY_CRC(data, len, expected) \  
+    assert(crc32(data, len) == expected)  
+Tích hợp preprocessor để chọn bank nhớ:
+c
+#if defined(STM32F4)  
+    #define FLASH_BANK_ADDR 0x08000000  
+#elif defined(STM32H7)  
+    #define FLASH_BANK_ADDR 0x08020000  
+#endif  
+
+Bài 7: Unified Diagnostic System (UDS) Integrator
+Yêu cầu:
+Kết hợp tất cả module thành hệ thống UDS:
+Sử dụng variadic functions cho diagnostic requests/responses
+Macro logging cho session management
+Assert chain cho security access
+c
+void uds_handler(uint8_t service, ...) {  
+    va_list args;  
+    va_start(args, service);  
+    switch(service) {  
+        case 0x10: // Diagnostic Session Control  
+            uint8_t sub = va_arg(args, int);  
+            ASSERT_SESSION(sub <= 3);  
+            start_session(sub);  
+            break;  
+        case 0x31: // Routine Control  
+            uint16_t id = va_arg(args, int);  
+            uint8_t action = va_arg(args, int);  
+            handle_routine(id, action);  
+            break;  
+    }  
+    va_end(args);  
+}  
